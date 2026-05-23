@@ -102,7 +102,7 @@ async def oauth_install():
         f"&redirect_uri={settings.SLACK_OAUTH_REDIRECT_URI}"
         f"&state={state}"
     )
-    return RedirectResponse(url)
+    return RedirectResponse(url, status_code=302)
 
 
 @app.get("/oauth/callback")
