@@ -110,9 +110,12 @@ async def oauth_callback(code: str = "", state: str = "", error: str = ""):
     if error:
         return HTMLResponse(_error_page(f"Slack authorization failed: {error}"))
 
-    stored_time = _oauth_states.pop(state, None)
-    if not stored_time:
-        return HTMLResponse(_error_page("Invalid or expired state. Please try again."))
+    # State validation: skip when state is empty (direct install from
+    # /api/slack-install which bypasses the backend's state generation).
+    if state:
+        stored_time = _oauth_states.pop(state, None)
+        if not stored_time:
+            return HTMLResponse(_error_page("Invalid or expired state. Please try again."))
 
     try:
         sdk = AsyncWebClient()
