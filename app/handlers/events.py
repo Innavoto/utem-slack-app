@@ -18,7 +18,56 @@ log = structlog.get_logger()
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
 
 
+_WELCOMED_USERS: set[str] = set()
+
+
 def register_events(app: AsyncApp, client: BackendClient):
+
+    @app.event("app_home_opened")
+    async def handle_home_opened(event, client_sdk):
+        user_id = event.get("user", "")
+        tab = event.get("tab", "")
+        if tab != "messages" or user_id in _WELCOMED_USERS:
+            return
+        _WELCOMED_USERS.add(user_id)
+        try:
+            await client_sdk.chat_postMessage(
+                channel=user_id,
+                blocks=[
+                    {
+                        "type": "header",
+                        "text": {"type": "plain_text", "text": "Welcome to UTEM Security"},
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": (
+                                "Hi there! :wave: I'm the UTEM Security bot. "
+                                "Here's what I can do:\n\n"
+                                ":mag: `/utem findings` — List open security findings\n"
+                                ":rocket: `/utem scan` — Trigger a security scan\n"
+                                ":bar_chart: `/utem status` — Platform health summary\n"
+                                ":question: `/utem help` — Show all commands\n\n"
+                                "You can also mention me in any channel — "
+                                "try `@UTEM Security status` or `@UTEM Security CVE-2024-1234`."
+                            ),
+                        },
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": "Powered by UTEM — Unified Threat Exposure Management by Innavoto India Pvt Ltd",
+                            }
+                        ],
+                    },
+                ],
+                text="Welcome to UTEM Security",
+            )
+        except Exception:
+            log.exception("welcome_message_failed", user_id=user_id)
 
     @app.event("app_mention")
     async def handle_mention(event, say):

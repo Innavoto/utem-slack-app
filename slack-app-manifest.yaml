@@ -52,6 +52,7 @@ settings:
     request_url: https://utem.innavoto.com/api/proxy/slack-app/slack/events
     bot_events:
       - app_mention
+      - app_home_opened
   interactivity:
     is_enabled: true
     request_url: https://utem.innavoto.com/api/proxy/slack-app/slack/interactions
