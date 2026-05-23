@@ -1,0 +1,60 @@
+display_information:
+  name: UTEM
+  description: >-
+    Unified Threat Exposure Management — security findings, scans, and
+    remediation actions delivered directly in Slack.
+  background_color: "#1a1a2e"
+  long_description: >-
+    UTEM by Innavoto India Pvt Ltd brings your security operations into Slack.
+    Receive real-time alerts for critical findings, query your exposure posture
+    with slash commands, and take remediation actions (acknowledge, dismiss,
+    escalate) without leaving your workspace.
+
+    Features:
+    - /utem findings — list open security findings by severity
+    - /utem scan — trigger a new security scan
+    - /utem status — view platform health and compliance posture
+    - Interactive finding cards with one-click Acknowledge / Dismiss / Escalate
+    - Per-channel severity routing (critical → #security-critical, etc.)
+    - @UTEM mentions for ad-hoc security queries
+
+    Requires a UTEM platform subscription. Visit https://utem.innavoto.com
+    for more information.
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: UTEM
+    always_online: true
+  slash_commands:
+    - command: /utem
+      url: https://utem.innavoto.com/api/proxy/slack-app/slack/commands
+      description: Query UTEM security platform
+      usage_hint: "[findings|scan|status|help] [options]"
+      should_escape: false
+oauth_config:
+  redirect_urls:
+    - https://utem.innavoto.com/api/proxy/slack-app/oauth/callback
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - app_mentions:read
+      - channels:read
+      - groups:read
+      - im:read
+      - mpim:read
+      - users:read
+settings:
+  event_subscriptions:
+    request_url: https://utem.innavoto.com/api/proxy/slack-app/slack/events
+    bot_events:
+      - app_mention
+  interactivity:
+    is_enabled: true
+    request_url: https://utem.innavoto.com/api/proxy/slack-app/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: true

@@ -1,0 +1,16 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-south1-docker.pkg.dev/utem-487107/ctem-images/utem-slack-app:${SHORT_SHA}'
+      - '-t'
+      - 'asia-south1-docker.pkg.dev/utem-487107/ctem-images/utem-slack-app:latest'
+      - '.'
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-south1-docker.pkg.dev/utem-487107/ctem-images/utem-slack-app:${SHORT_SHA}']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-south1-docker.pkg.dev/utem-487107/ctem-images/utem-slack-app:latest']
+images:
+  - 'asia-south1-docker.pkg.dev/utem-487107/ctem-images/utem-slack-app:${SHORT_SHA}'
+  - 'asia-south1-docker.pkg.dev/utem-487107/ctem-images/utem-slack-app:latest'
