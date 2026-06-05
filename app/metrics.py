@@ -31,7 +31,7 @@ oauth_installs = Counter(
 )
 backend_requests = Counter(
     "ctem_slack_app_backend_requests_total",
-    "Requests to ctem-backend",
+    "Requests to utem-platform-backend",
     ["endpoint", "status"],
 )
 active_workspaces = Gauge(

@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     SLACK_SIGNING_SECRET: str = ""
     SLACK_APP_TOKEN: str = ""
 
-    CTEM_BACKEND_URL: str = "http://ctem-backend:8000"
-    CTEM_INTERNAL_TOKEN: str = ""
+    UTEM_BACKEND_URL: str = "http://utem-platform-backend:8000"
+    UTEM_INTERNAL_TOKEN: str = ""
 
     SLACK_OAUTH_REDIRECT_URI: str = (
         "https://utem.innavoto.com/api/proxy/slack-app/oauth/callback"

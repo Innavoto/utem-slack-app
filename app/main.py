@@ -66,7 +66,7 @@ async def prometheus_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-# -- Slack event routes (proxied from ctem-admin-react) ----------------------
+# -- Slack event routes (proxied from utem-ui-admin) ----------------------
 
 @app.post("/slack/events")
 async def slack_events(request: Request):
@@ -167,12 +167,12 @@ h1{{color:#1a1a2e}}a{{color:#4682b4}}</style></head>
     )
 
 
-# -- Internal notification webhook (ctem-backend pushes here) ----------------
+# -- Internal notification webhook (utem-platform-backend pushes here) ----------------
 
 @app.post("/api/v1/notify")
 async def receive_notification(request: Request, payload: FindingNotification):
     token = request.headers.get("X-Internal-Service-Token", "")
-    if not hmac.compare_digest(token, settings.CTEM_INTERNAL_TOKEN):
+    if not hmac.compare_digest(token, settings.UTEM_INTERNAL_TOKEN):
         raise HTTPException(status_code=401, detail="unauthorized")
 
     start = time.monotonic()

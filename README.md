@@ -34,12 +34,12 @@ Built on [Slack Bolt for Python](https://slack.dev/bolt-python/) + FastAPI.
 ## Architecture
 
 ```
-Slack API ←→ ctem-admin-react (proxy) ←→ utem-slack-app:8098 ←→ ctem-backend:8000
+Slack API ←→ utem-ui-admin (proxy) ←→ utem-slack-app:8098 ←→ utem-platform-backend:8000
 ```
 
 - OAuth callback, slash commands, interactions, and events are proxied through
   `https://utem.innavoto.com/api/proxy/slack-app/*`
-- utem-slack-app is stateless — all data lives in ctem-backend
+- utem-slack-app is stateless — all data lives in utem-platform-backend
 - Bot tokens stored encrypted in `slack_bot_integrations` table
 
 ---
@@ -53,8 +53,8 @@ pip install -r requirements.txt
 export SLACK_CLIENT_ID=...
 export SLACK_CLIENT_SECRET=...
 export SLACK_SIGNING_SECRET=...
-export CTEM_BACKEND_URL=http://localhost:8000
-export CTEM_INTERNAL_TOKEN=...
+export UTEM_BACKEND_URL=http://localhost:8000
+export UTEM_INTERNAL_TOKEN=...
 
 # Run
 uvicorn app.main:app --port 8098 --reload
