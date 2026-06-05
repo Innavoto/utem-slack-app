@@ -21,8 +21,8 @@ _BACKOFF_MS = [200, 400, 800]
 
 class BackendClient:
     def __init__(self, base_url: str | None = None, token: str | None = None):
-        self._base = (base_url or settings.CTEM_BACKEND_URL).rstrip("/")
-        self._token = token or settings.CTEM_INTERNAL_TOKEN
+        self._base = (base_url or settings.UTEM_BACKEND_URL).rstrip("/")
+        self._token = token or settings.UTEM_INTERNAL_TOKEN
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=30.0,
