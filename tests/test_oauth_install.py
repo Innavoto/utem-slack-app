@@ -9,12 +9,15 @@ rejected rather than mis-attributed.
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app import main as main_module
 from app import metrics
+
+_STATE_PREFIX = "slack:oauth:state:"
 
 
 def _oauth_installs_value(status: str) -> float:
@@ -25,6 +28,20 @@ def _oauth_installs_value(status: str) -> float:
     return 0.0
 
 
+def _stored_states() -> dict[str, int]:
+    """State-key -> tenant_id currently held by the (memory-fallback) store."""
+    store = main_module.state_store
+    return {
+        k[len(_STATE_PREFIX):]: int(v)
+        for k, (_exp, v) in store._mem.items()
+        if k.startswith(_STATE_PREFIX)
+    }
+
+
+def _state_from_redirect(location: str) -> str:
+    return parse_qs(urlparse(location).query)["state"][0]
+
+
 @pytest.fixture
 def client():
     transport = ASGITransport(app=main_module.app)
@@ -33,9 +50,9 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _clear_oauth_states():
-    main_module._oauth_states.clear()
+    main_module.state_store._mem.clear()
     yield
-    main_module._oauth_states.clear()
+    main_module.state_store._mem.clear()
 
 
 class TestOauthInstall:
@@ -45,14 +62,14 @@ class TestOauthInstall:
             resp = await c.get("/oauth/install")
         assert resp.status_code == 400
         assert "tenant" in resp.text.lower()
-        assert len(main_module._oauth_states) == 0
+        assert len(_stored_states()) == 0
 
     @pytest.mark.asyncio
     async def test_non_positive_tenant_id_rejected(self, client):
         async with client as c:
             resp = await c.get("/oauth/install", params={"tenant_id": 0})
         assert resp.status_code == 400
-        assert len(main_module._oauth_states) == 0
+        assert len(_stored_states()) == 0
 
     @pytest.mark.asyncio
     async def test_non_integer_tenant_id_rejected(self, client):
@@ -68,8 +85,9 @@ class TestOauthInstall:
             )
         assert resp.status_code == 302
         assert "slack.com/oauth/v2/authorize" in resp.headers["location"]
-        assert len(main_module._oauth_states) == 1
-        (state, (_, tenant_id)) = next(iter(main_module._oauth_states.items()))
+        stored = _stored_states()
+        assert len(stored) == 1
+        state, tenant_id = next(iter(stored.items()))
         assert tenant_id == 42
         assert f"state={state}" in resp.headers["location"]
 
@@ -99,7 +117,7 @@ class TestOauthCallback:
             install_resp = await c.get(
                 "/oauth/install", params={"tenant_id": 77}, follow_redirects=False
             )
-            state = next(iter(main_module._oauth_states.keys()))
+            state = _state_from_redirect(install_resp.headers["location"])
 
             fake_oauth_resp = {
                 "team": {"id": "T123", "name": "Acme Corp"},
@@ -125,7 +143,7 @@ class TestOauthCallback:
         assert kwargs["tenant_id"] == 77
         assert kwargs["team_id"] == "T123"
         # state must be single-use
-        assert state not in main_module._oauth_states
+        assert state not in _stored_states()
 
     @pytest.mark.asyncio
     async def test_no_state_direct_install_is_rejected_not_defaulted(self, client):
@@ -150,7 +168,7 @@ class TestOauthCallback:
             install_resp = await c.get(
                 "/oauth/install", params={"tenant_id": 5}, follow_redirects=False
             )
-            state = next(iter(main_module._oauth_states.keys()))
+            state = _state_from_redirect(install_resp.headers["location"])
 
             with patch.object(
                 main_module.AsyncWebClient,
@@ -173,7 +191,7 @@ class TestOauthCallback:
             install_resp = await c.get(
                 "/oauth/install", params={"tenant_id": 9}, follow_redirects=False
             )
-            state = next(iter(main_module._oauth_states.keys()))
+            state = _state_from_redirect(install_resp.headers["location"])
 
             fake_oauth_resp = {
                 "team": {"id": "T1", "name": "Beta"},
@@ -196,3 +214,32 @@ class TestOauthCallback:
 
         assert resp.status_code == 200
         assert "config save failed" in resp.text.lower()
+
+
+class TestInstallRouteRegistered:
+    """checked-by (c): this service's install route is registered and does not
+    404 at the app boundary. (`/api/slack-install` — cited in the audit — is a
+    Next.js route that lives in utem-ui-admin, a separate repo; the route this
+    service actually serves is `/oauth/install`.)"""
+
+    def test_oauth_install_route_is_registered(self):
+        paths = {route.path for route in main_module.app.routes}
+        assert "/oauth/install" in paths
+        assert "/oauth/callback" in paths
+
+    @pytest.mark.asyncio
+    async def test_install_route_does_not_404(self, client):
+        # Missing tenant_id → 400 (a real, registered response), never 404.
+        async with client as c:
+            resp = await c.get("/oauth/install")
+        assert resp.status_code != 404
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_install_route_redirects_with_valid_tenant(self, client):
+        async with client as c:
+            resp = await c.get(
+                "/oauth/install", params={"tenant_id": 1234}, follow_redirects=False
+            )
+        assert resp.status_code == 302
+        assert "slack.com/oauth/v2/authorize" in resp.headers["location"]

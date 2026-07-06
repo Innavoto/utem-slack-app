@@ -10,7 +10,9 @@ prometheus-client==0.20.0
 cryptography==42.0.8
 structlog==24.2.0
 python-multipart==0.0.9
+redis>=5.0.0
 pytest==8.2.2
 pytest-asyncio==0.23.7
 pytest-cov==5.0.0
 respx==0.21.1
+fakeredis>=2.20.0
