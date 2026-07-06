@@ -6,7 +6,7 @@ import secrets
 import time
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
@@ -47,8 +47,12 @@ slack_handler = AsyncSlackRequestHandler(slack_app)
 
 app = FastAPI(title="UTEM Slack App", version="1.0.0")
 
-# CSRF state store (in-memory; single-replica is fine for dev)
-_oauth_states: dict[str, float] = {}
+# CSRF state store (in-memory; single-replica is fine for dev).
+# Maps state -> (created_at, tenant_id). tenant_id is threaded through so
+# /oauth/callback knows *which UTEM tenant* this install belongs to instead
+# of guessing (see G61 — previously hardcoded to tenant_id=1 for every
+# install, a cross-tenant data leak).
+_oauth_states: dict[str, tuple[float, int]] = {}
 
 
 @app.get("/healthz")
@@ -86,9 +90,22 @@ async def slack_interactions(request: Request):
 # -- OAuth 2.0 V2 install flow ----------------------------------------------
 
 @app.get("/oauth/install")
-async def oauth_install():
+async def oauth_install(tenant_id: str = Query(default="")):
+    parsed_tenant_id = _parse_tenant_id(tenant_id)
+    if parsed_tenant_id is None:
+        log.warning("oauth_install_missing_tenant_id", tenant_id=tenant_id)
+        return HTMLResponse(
+            _error_page(
+                "Missing or invalid tenant_id. Install UTEM for Slack from "
+                "the UTEM dashboard's Extensions page so your account can be "
+                "linked correctly."
+            ),
+            status_code=400,
+        )
+    tenant_id = parsed_tenant_id
+
     state = secrets.token_urlsafe(32)
-    _oauth_states[state] = time.time()
+    _oauth_states[state] = (time.time(), tenant_id)
     _cleanup_stale_states()
 
     scopes = (
@@ -110,12 +127,32 @@ async def oauth_callback(code: str = "", state: str = "", error: str = ""):
     if error:
         return HTMLResponse(_error_page(f"Slack authorization failed: {error}"))
 
-    # State validation: skip when state is empty (direct install from
-    # /api/slack-install which bypasses the backend's state generation).
+    # Tenant resolution: the CSRF `state` created by /oauth/install carries
+    # the installing tenant's id. A request with no state at all is the
+    # Slack-Marketplace "direct install" bypass
+    # (utem-ui-admin/app/api/slack-install/route.ts hits Slack's
+    # oauth/v2/authorize directly, skipping /oauth/install) — there is no
+    # way to safely know which tenant that install belongs to, so it MUST be
+    # rejected rather than attributed to a guessed/default tenant (that was
+    # previously hardcoded to tenant_id=1, causing every workspace's install
+    # to read/write tenant 1's data — see G61).
     if state:
-        stored_time = _oauth_states.pop(state, None)
-        if not stored_time:
+        stored = _oauth_states.pop(state, None)
+        if not stored:
             return HTMLResponse(_error_page("Invalid or expired state. Please try again."))
+        _, tenant_id = stored
+    else:
+        log.warning("oauth_install_rejected_no_tenant")
+        metrics.oauth_installs.labels(status="rejected_no_tenant").inc()
+        return HTMLResponse(
+            _error_page(
+                "Could not determine which UTEM tenant this install belongs "
+                "to. Please install UTEM for Slack from the UTEM dashboard's "
+                "Extensions page (Settings → Integrations → Slack) "
+                "instead of Slack's App Directory, so your account can be "
+                "linked correctly."
+            )
+        )
 
     try:
         sdk = AsyncWebClient()
@@ -137,10 +174,8 @@ async def oauth_callback(code: str = "", state: str = "", error: str = ""):
     channel = resp.get("incoming_webhook", {}).get("channel", "#general")
 
     try:
-        # For now, use a default tenant ID. In production, the OAuth state
-        # would carry the tenant context from the UTEM install page.
         await backend.save_oauth_token(
-            tenant_id=1,
+            tenant_id=tenant_id,
             team_id=team_id,
             team_name=team_name,
             bot_token=bot_token,
@@ -235,9 +270,20 @@ async def receive_notification(request: Request, payload: FindingNotification):
 
 def _cleanup_stale_states():
     cutoff = time.time() - 600
-    stale = [k for k, v in _oauth_states.items() if v < cutoff]
+    stale = [k for k, (ts, _tenant_id) in _oauth_states.items() if ts < cutoff]
     for k in stale:
         _oauth_states.pop(k, None)
+
+
+def _parse_tenant_id(raw: str) -> int | None:
+    """Validate a tenant_id query param. Returns None if missing/invalid."""
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 def _error_page(message: str) -> str:
