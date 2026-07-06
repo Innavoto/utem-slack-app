@@ -12,24 +12,28 @@ from app.services.block_kit import (
     build_health_summary,
     build_help,
 )
+from app.services.state_store import StateStore
 
 log = structlog.get_logger()
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
 
 
-_WELCOMED_USERS: set[str] = set()
-
-
-def register_events(app: AsyncApp, client: BackendClient):
+def register_events(app: AsyncApp, client: BackendClient, state_store: StateStore):
 
     @app.event("app_home_opened")
     async def handle_home_opened(event, client_sdk):
         user_id = event.get("user", "")
+        team_id = event.get("team", "") or event.get("view", {}).get("team_id", "")
         tab = event.get("tab", "")
-        if tab != "messages" or user_id in _WELCOMED_USERS:
+        if tab != "messages":
             return
-        _WELCOMED_USERS.add(user_id)
+        # Durable, cross-replica dedupe (G80): the welcome fires at most once
+        # per (workspace, user) even across restarts and multiple workers,
+        # replacing the old per-process in-memory set that re-greeted users
+        # after every restart.
+        if not await state_store.mark_welcomed(f"{team_id}:{user_id}"):
+            return
         try:
             await client_sdk.chat_postMessage(
                 channel=user_id,

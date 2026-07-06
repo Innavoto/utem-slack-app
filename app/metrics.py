@@ -38,3 +38,10 @@ active_workspaces = Gauge(
     "ctem_slack_app_active_workspaces",
     "Slack workspaces with active install",
 )
+state_store_ops = Counter(
+    "ctem_slack_app_state_store_ops_total",
+    "OAuth-state / welcome-dedupe store operations by backend "
+    "(backend=memory indicates a Redis outage or unconfigured REDIS_URL — "
+    "not durable across workers/replicas)",
+    ["op", "backend"],
+)

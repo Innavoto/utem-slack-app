@@ -22,6 +22,7 @@ from app.models.schemas import FindingNotification
 from app.services.backend_client import BackendClient
 from app.services.block_kit import build_finding_card
 from app.services.channel_router import ChannelRouter
+from app.services.state_store import StateStore
 from app import metrics
 
 log = structlog.get_logger()
@@ -37,22 +38,20 @@ slack_app = AsyncApp(
 backend = BackendClient()
 router = ChannelRouter()
 
+# Durable OAuth-state + welcome-dedupe store (G80). Backed by the shared
+# cluster Redis so state survives restarts and is consistent across the 2
+# Uvicorn workers the Dockerfile runs (`--workers 2`) and across replicas.
+state_store = StateStore(redis_url=settings.REDIS_URL)
+
 register_commands(slack_app, backend)
 register_interactions(slack_app, backend)
-register_events(slack_app, backend)
+register_events(slack_app, backend, state_store)
 
 slack_handler = AsyncSlackRequestHandler(slack_app)
 
 # -- FastAPI app -------------------------------------------------------------
 
 app = FastAPI(title="UTEM Slack App", version="1.0.0")
-
-# CSRF state store (in-memory; single-replica is fine for dev).
-# Maps state -> (created_at, tenant_id). tenant_id is threaded through so
-# /oauth/callback knows *which UTEM tenant* this install belongs to instead
-# of guessing (see G61 — previously hardcoded to tenant_id=1 for every
-# install, a cross-tenant data leak).
-_oauth_states: dict[str, tuple[float, int]] = {}
 
 
 @app.get("/healthz")
@@ -105,8 +104,7 @@ async def oauth_install(tenant_id: str = Query(default="")):
     tenant_id = parsed_tenant_id
 
     state = secrets.token_urlsafe(32)
-    _oauth_states[state] = (time.time(), tenant_id)
-    _cleanup_stale_states()
+    await state_store.put_oauth_state(state, tenant_id)
 
     scopes = (
         "chat:write,commands,app_mentions:read,"
@@ -137,10 +135,9 @@ async def oauth_callback(code: str = "", state: str = "", error: str = ""):
     # previously hardcoded to tenant_id=1, causing every workspace's install
     # to read/write tenant 1's data — see G61).
     if state:
-        stored = _oauth_states.pop(state, None)
-        if not stored:
+        tenant_id = await state_store.pop_oauth_state(state)
+        if tenant_id is None:
             return HTMLResponse(_error_page("Invalid or expired state. Please try again."))
-        _, tenant_id = stored
     else:
         log.warning("oauth_install_rejected_no_tenant")
         metrics.oauth_installs.labels(status="rejected_no_tenant").inc()
@@ -268,13 +265,6 @@ async def receive_notification(request: Request, payload: FindingNotification):
 
 # -- helpers -----------------------------------------------------------------
 
-def _cleanup_stale_states():
-    cutoff = time.time() - 600
-    stale = [k for k, (ts, _tenant_id) in _oauth_states.items() if ts < cutoff]
-    for k in stale:
-        _oauth_states.pop(k, None)
-
-
 def _parse_tenant_id(raw: str) -> int | None:
     """Validate a tenant_id query param. Returns None if missing/invalid."""
     if not raw:
@@ -306,4 +296,5 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     await backend.close()
+    await state_store.close()
     log.info("utem_slack_app_stopped")
