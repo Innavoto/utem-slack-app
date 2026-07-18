@@ -54,6 +54,7 @@ def setup_tracing(app=None, service_name: str | None = None) -> None:
         return
 
     _instrument_fastapi(app)
+    _install_deep_span_middleware(app, name)
     # Each auto-instrumentor is guarded independently — a missing lib is fine.
     for module, cls in (
         ("httpx", "HTTPXClientInstrumentor"),
@@ -79,3 +80,98 @@ def _instrument_fastapi(app) -> None:
         FastAPIInstrumentor.instrument_app(app)
     except Exception:  # noqa: BLE001,silent-except  best-effort: fastapi instr optional
         pass
+
+
+def _install_deep_span_middleware(app, service_name: str) -> None:
+    """Emit one INTERNAL 'deep' span per request named ``<svc>.<operation>``.
+
+    The auto FastAPI/redis/httpx instrumentors only produce SERVER/CLIENT spans
+    plus generic 'http send' INTERNAL spans — none match the dotted manual-span
+    convention (``<svc>.<op>``) the 'Deep code-level spans' dashboards query
+    (span_kind=INTERNAL, name ~ ``[a-z][a-z0-9-]*\\.[a-z0-9_.-]+``). This gives
+    every service a per-operation deep span so those panels populate, and is the
+    anchor services graft finer ``deep_span("svc.subop")`` calls onto.
+    """
+    if app is None:
+        return
+    short = service_name.split("utem-", 1)[-1] or "svc"  # utem-certwatch -> certwatch
+    try:
+        from opentelemetry import trace
+        from opentelemetry.trace import SpanKind
+
+        tracer = trace.get_tracer("utem.deepspan")
+
+        # Pure ASGI middleware — does NOT buffer the response, so it is safe with
+        # StreamingResponse / SSE / BackgroundTasks (unlike Starlette BaseHTTPMiddleware).
+        class _DeepSpanASGI:
+            def __init__(self, app):
+                self.app = app
+
+            async def __call__(self, scope, receive, send):
+                if scope.get("type") != "http":
+                    return await self.app(scope, receive, send)
+                with tracer.start_as_current_span(
+                    f"{short}.request", kind=SpanKind.INTERNAL
+                ) as span:
+                    async def _send(message):
+                        if message.get("type") == "http.response.start":
+                            try:
+                                span.set_attribute("http.status_code", message.get("status", 0))
+                                route = scope.get("route")
+                                op = getattr(route, "name", None) or getattr(
+                                    getattr(route, "endpoint", None), "__name__", None
+                                )
+                                if op:
+                                    span.update_name(f"{short}.{op}")
+                            except Exception:  # noqa: BLE001
+                                pass
+                        await send(message)
+
+                    await self.app(scope, receive, _send)
+
+        app.add_middleware(_DeepSpanASGI)
+    except Exception:  # noqa: BLE001,silent-except  best-effort: middleware optional
+        pass
+
+
+# ── Public helpers for hand-authored business-logic spans ──────────────────────
+def deep_span(name: str):
+    """Context manager for a manual INTERNAL span: ``with deep_span("svc.op"): ...``."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _cm():
+        try:
+            from opentelemetry import trace
+            from opentelemetry.trace import SpanKind
+
+            with trace.get_tracer("utem.deepspan").start_as_current_span(
+                name, kind=SpanKind.INTERNAL
+            ):
+                yield
+        except Exception:  # noqa: BLE001
+            yield
+
+    return _cm()
+
+
+def traced(name: str):
+    """Decorator wrapping a sync/async function in a manual INTERNAL span ``name``."""
+    import functools
+    import inspect
+
+    def deco(fn):
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def awrap(*a, **k):
+                with deep_span(name):
+                    return await fn(*a, **k)
+            return awrap
+
+        @functools.wraps(fn)
+        def wrap(*a, **k):
+            with deep_span(name):
+                return fn(*a, **k)
+        return wrap
+
+    return deco
