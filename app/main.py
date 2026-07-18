@@ -302,3 +302,5 @@ async def shutdown():
     await backend.close()
     await state_store.close()
     log.info("utem_slack_app_stopped")
+
+# otel deep-span rebuild marker 3fd887e

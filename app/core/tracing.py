@@ -123,7 +123,7 @@ def _install_deep_span_middleware(app, service_name: str) -> None:
                                 )
                                 if op:
                                     span.update_name(f"{short}.{op}")
-                            except Exception:  # noqa: BLE001
+                            except Exception:  # noqa: BLE001,silent-except  best-effort span enrichment
                                 pass
                         await send(message)
 
@@ -149,7 +149,7 @@ def deep_span(name: str):
                 name, kind=SpanKind.INTERNAL
             ):
                 yield
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001,silent-except  best-effort: tracing must never break business logic
             yield
 
     return _cm()
