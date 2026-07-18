@@ -16,3 +16,12 @@ pytest-asyncio==0.23.7
 pytest-cov==5.0.0
 respx==0.21.1
 fakeredis>=2.20.0
+opentelemetry-sdk==1.25.0
+opentelemetry-exporter-otlp-proto-grpc==1.25.0
+opentelemetry-instrumentation-fastapi==0.46b0
+opentelemetry-instrumentation-httpx==0.46b0
+opentelemetry-instrumentation-requests==0.46b0
+opentelemetry-instrumentation-sqlalchemy==0.46b0
+opentelemetry-instrumentation-asyncpg==0.46b0
+opentelemetry-instrumentation-redis==0.46b0
+opentelemetry-instrumentation-logging==0.46b0

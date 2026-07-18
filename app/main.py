@@ -288,6 +288,10 @@ h1{{color:#b22222}}a{{color:#4682b4}}</style></head>
 </body></html>"""
 
 
+from app.core.tracing import setup_tracing
+setup_tracing(app, service_name="utem-slack-app")
+
+
 @app.on_event("startup")
 async def startup():
     log.info("utem_slack_app_starting", port=settings.APP_PORT)
